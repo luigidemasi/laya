@@ -1,0 +1,120 @@
+= Laya decision service container
+
+A general-purpose CPU container for https://github.com/NandhaKishorM/laya[Laya],
+with an optional custom HTTP request path. It uses Laya's native request handler,
+authentication and response schema.
+
+The image packages Python 3.11, CPU PyTorch, Laya 0.3.22 and Transformers 5.18.0.
+The host needs Docker or Podman; no host Python installation is required.
+
+== Run
+
+[source,shell]
+----
+podman run -d --name laya \
+  -p 127.0.0.1:8100:8100 \
+  -e LAYA_API_KEY=local-demo \
+  -v laya-cache:/home/laya/.cache/huggingface \
+  ghcr.io/luigidemasi/laya:0.3.22-2
+podman logs -f laya
+----
+
+Docker users can replace `podman` with `docker`.
+The published image currently supports Linux AMD64 and CPU inference. It has been
+tested on Linux AMD64. Intel Macs and Intel/AMD Windows machines need a Linux
+container runtime; ARM machines require AMD64 emulation, which is not validated here.
+
+The first start downloads the typed-decisions checkpoint and may take several minutes.
+The named volume keeps the weights across container replacements.
+The health endpoint becomes available after model preloading finishes:
+
+[source,shell]
+----
+curl -sS http://127.0.0.1:8100/health
+----
+
+The container runs as an unprivileged user. The command above binds the service
+to loopback and supplies a public demonstration API key at runtime; no API key is
+baked into the image.
+
+== Make a decision
+
+The default endpoint is Laya's native `POST /v1/systemone`:
+
+[source,shell]
+----
+curl -sS http://127.0.0.1:8100/v1/systemone \
+  -H 'Authorization: Bearer local-demo' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "model": "convaiinnovations/laya-typed-decisions",
+    "state": "Please help me reset my password.",
+    "questions": {
+      "support_request": {
+        "type": "noul",
+        "instructions": "Is the user asking for technical support?"
+      }
+    }
+  }'
+----
+
+The explicit model selects the preloaded typed-decisions checkpoint.
+See the https://github.com/NandhaKishorM/laya[upstream documentation] for the
+decision types and response semantics.
+
+== Configure the service
+
+[cols="1,1,2",options="header"]
+|===
+|Environment variable |Image default |Purpose
+|`LAYA_API_PATH` |`/v1/systemone` |Full path for the decision endpoint.
+|`LAYA_API_KEY` |Unset |Bearer credential supplied at runtime; unset or empty disables authentication.
+|`LAYA_MODELS` |`typed-decisions` |Model selection for preloading.
+|`LAYA_REVISION` |`reviewed` |Model revisions reviewed by the pinned Laya package.
+|`LAYA_PRELOAD` |`1` |Preload models before serving requests.
+|`LAYA_THREADS` |`4` |CPU inference threads.
+|`LAYA_DEVICE` |`cpu` |Inference device; this image installs CPU PyTorch.
+|===
+
+For a custom path, add `-e LAYA_API_PATH=/v1/decision` to the run command.
+A prefix is also supported, for example `-e LAYA_API_PATH=/decisions/v1/evaluate`.
+This adds an alias for the native handler, so `/v1/systemone` remains available.
+Authentication, request validation, response fields and confidence semantics are
+the same at both paths. Health stays at `/health`.
+
+The path must start with `/`; each nonempty segment may contain ASCII letters,
+digits, underscores and hyphens. Trailing slashes, query strings, fragments, path
+templates and collisions with existing endpoints are rejected at startup.
+`LAYA_ROOT_PATH` remains Laya's separate reverse-proxy setting; it does not rename routes.
+
+== Build and test
+
+From this repository's root:
+
+[source,shell]
+----
+podman build --format docker -t ghcr.io/luigidemasi/laya:0.3.22-2 .
+----
+
+With Docker, use `docker build` and omit `--format docker`. The Podman format
+option retains the Dockerfile health check. The tag combines the Laya version
+with the container wrapper revision.
+
+The build checks installed dependencies and runs `test_app.py` without downloading
+model weights. The tests cover default and custom paths, native response behavior,
+authentication, malformed requests and invalid path configuration.
+
+== Stop
+
+These commands retain the model cache:
+
+[source,shell]
+----
+podman stop laya
+podman rm laya
+----
+
+== License
+
+The container recipe and adapter are licensed under Apache License 2.0; see
+`LICENSE.txt`. Dependencies and downloaded model weights retain their respective licenses.

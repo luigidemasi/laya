@@ -1,0 +1,5 @@
+Laya container
+Copyright 2026 Luigi De Masi
+
+Laya and the Python dependencies retain their own notices and license files
+in their installed packages.
